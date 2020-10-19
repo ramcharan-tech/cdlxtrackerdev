@@ -561,7 +561,7 @@ function getMetrics() {
 
     if (matches && matches[11] && matches[11] !== window.location.hostname) {
       var ignoring = false;
-      var ignoreReferrers = configs_1.Config.ignoreReferrers();
+      var ignoreReferrers = configs_1.Config.ignoreReferrers;
 
       if (ignoreReferrers && ignoreReferrers.length) {
         for (var k = 0; k < ignoreReferrers.length; k++) {
