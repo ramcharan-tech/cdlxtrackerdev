@@ -271,34 +271,6 @@ function deserialize(data) {
 }
 
 exports.deserialize = deserialize;
-},{}],"globalContext.ts":[function(require,module,exports) {
-"use strict";
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.GlobalContext = void 0;
-
-var GlobalContext =
-/** @class */
-function () {
-  function GlobalContext() {
-    this.lastParams = {};
-  }
-
-  GlobalContext.prototype.setLastParams = function (input) {
-    this.lastParams = input;
-  };
-
-  GlobalContext.prototype.getLastParams = function () {
-    return this.lastParams;
-  };
-
-  return GlobalContext;
-}();
-
-var globalContext = new GlobalContext();
-exports.GlobalContext = globalContext;
 },{}],"core/helpers/utils.ts":[function(require,module,exports) {
 "use strict";
 
@@ -375,19 +347,615 @@ function cloneObject(original) {
 }
 
 exports.cloneObject = cloneObject;
-},{}],"core/eventUtils.ts":[function(require,module,exports) {
+},{}],"core/globals.ts":[function(require,module,exports) {
 "use strict";
 
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.push_custom_events = exports.push_events = void 0;
+
+var Globals =
+/** @class */
+function () {
+  function Globals() {}
+
+  Globals.SDK_VERSION = "20.04";
+  Globals.SDK_NAME = "javascript_native_web";
+  /**
+   * Array with list of available features that you can require consent for
+   */
+
+  Globals.features = ["sessions", "scrolls", "events", "views", "clicks", "forms", "crashes", "attribution", "users", "star-rating", "location", "apm", "query-params", "all-clicks", "all-links"];
+  return Globals;
+}();
+
+exports.default = Globals;
+},{}],"globalContext.ts":[function(require,module,exports) {
+"use strict";
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.GlobalContext = void 0;
+
+var GlobalContext =
+/** @class */
+function () {
+  function GlobalContext() {
+    this.lastParams = {};
+    this.contextInfo = {};
+  }
+
+  GlobalContext.prototype.setLastParams = function (input) {
+    this.lastParams = input;
+  };
+
+  GlobalContext.prototype.getLastParams = function () {
+    return this.lastParams;
+  };
+
+  GlobalContext.prototype.setContextInfo = function (input) {
+    this.contextInfo = input;
+  };
+
+  GlobalContext.prototype.getContextInfo = function () {
+    return this.contextInfo;
+  };
+
+  return GlobalContext;
+}();
+
+var globalContext = new GlobalContext();
+exports.GlobalContext = globalContext;
+},{}],"core/requestBuilder.ts":[function(require,module,exports) {
+"use strict";
+
+var __importDefault = this && this.__importDefault || function (mod) {
+  return mod && mod.__esModule ? mod : {
+    "default": mod
+  };
+};
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.prepareRequest = void 0;
+
+var configs_1 = require("./configs");
+
+var utils_1 = require("./helpers/utils");
+
+var globals_1 = __importDefault(require("./globals"));
+
+var globalContext_1 = require("../globalContext");
+
+var store_1 = require("./store/store"); //prepare request by adding basic info to it
+
+
+function prepareRequest(request) {
+  request.app_key = configs_1.Config.app_key;
+  request.device_id = configs_1.Config.device_id;
+  request.sdk_info = {
+    sdk_name: globals_1.default.SDK_NAME,
+    sdk_version: globals_1.default.SDK_VERSION
+  };
+  addGlobalContextToRequest(request);
+  var date = new Date();
+  request.timestamp = date.getTime();
+  request.date = date;
+}
+
+exports.prepareRequest = prepareRequest;
+
+function addGlobalContextToRequest(requestItem) {
+  var context = globalContext_1.GlobalContext.getContextInfo();
+
+  if (context) {
+    requestItem.context = utils_1.cloneObject(context);
+  } // TODO: Decide on whether to send this data on every post/ only a dedicated post (we need a linking factor here like unique identity of user.)
+
+
+  requestItem.urlParamsInfo = store_1.store("urlParamsInfo");
+  requestItem.utmTagsInfo = store_1.store("utmTagsInfo");
+}
+},{"./configs":"core/configs.ts","./helpers/utils":"core/helpers/utils.ts","./globals":"core/globals.ts","../globalContext":"globalContext.ts","./store/store":"core/store/store.ts"}],"core/queues/queueWrapper.ts":[function(require,module,exports) {
+"use strict";
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.toRequestQueue = exports.getRequestQueue = exports.getEventQueue = exports.setRequestQueue = exports.setEventQueue = exports.requestQueue = exports.eventQueue = void 0;
+
+var configs_1 = require("../configs");
+
+var logger_1 = require("../logger");
+
+var store_1 = require("../store/store");
+
+var requestBuilder_1 = require("../requestBuilder");
+
+exports.eventQueue = [];
+exports.requestQueue = [];
+
+function setEventQueue(request) {
+  exports.eventQueue = request;
+}
+
+exports.setEventQueue = setEventQueue;
+
+function setRequestQueue(request) {
+  exports.requestQueue = request;
+}
+
+exports.setRequestQueue = setRequestQueue;
+
+function getEventQueue() {
+  return exports.eventQueue;
+}
+
+exports.getEventQueue = getEventQueue;
+
+function getRequestQueue() {
+  return exports.requestQueue;
+}
+
+exports.getRequestQueue = getRequestQueue; //insert request to queue
+
+function toRequestQueue(request) {
+  if (configs_1.Config.ignore_visitor) {
+    return;
+  }
+
+  if (!configs_1.Config.app_key || !configs_1.Config.device_id) {
+    logger_1.Logger.log("app_key or device_id is missing");
+    return;
+  }
+
+  requestBuilder_1.prepareRequest(request); // NOTE: Here we have a risk of lossing some statistics, if the CollectorAPI is slow/dead.
+  // We must need a max queueSize limitation otherwise, we would end up consuming more memory on the advertiser site. i.e. user's browser memory.
+
+  if (exports.requestQueue.length > configs_1.Config.queueSize) {
+    exports.requestQueue.shift();
+  }
+
+  exports.requestQueue.push(request);
+  store_1.store("request_queue_data", exports.requestQueue, true);
+}
+
+exports.toRequestQueue = toRequestQueue;
+},{"../configs":"core/configs.ts","../logger":"core/logger/index.ts","../store/store":"core/store/store.ts","../requestBuilder":"core/requestBuilder.ts"}],"core/configWrapper.ts":[function(require,module,exports) {
+"use strict";
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.getRemoteConfigs = exports.setRemoteConfigs = exports.isOfflineMode = exports.isDebug = void 0;
+
+var configs_1 = require("./configs");
+
+function isDebug() {
+  return configs_1.Config.debug;
+}
+
+exports.isDebug = isDebug;
+
+function isOfflineMode() {
+  return configs_1.Config.offlineMode;
+}
+
+exports.isOfflineMode = isOfflineMode;
+
+function setRemoteConfigs(remoteConfigs) {
+  configs_1.Config.remoteConfigs = remoteConfigs;
+}
+
+exports.setRemoteConfigs = setRemoteConfigs;
+
+function getRemoteConfigs() {
+  return configs_1.Config.remoteConfigs;
+}
+
+exports.getRemoteConfigs = getRemoteConfigs;
+},{"./configs":"core/configs.ts"}],"core/store/store.ts":[function(require,module,exports) {
+"use strict";
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.setToken = exports.store = void 0;
+
+var serializer_1 = require("../helpers/serializer");
+
+var configs_1 = require("../configs");
+
+var queueWrapper_1 = require("../queues/queueWrapper");
+
+var configWrapper_1 = require("../configWrapper");
+/**
+ * Simple localStorage with Cookie Fallback
+ * v.1.0.0
+ *
+ * USAGE:
+ * ----------------------------------------
+ * Set New / Modify:
+ *   store("my_key", "some_value");
+ *
+ * Retrieve:
+ *   store("my_key");
+ *
+ * Delete / Remove:
+ *   store("my_key", null);
+ */
+
+
+function store(key, value, noFallbackToCookie) {
+  //apply namespace
+  key = configs_1.Config.namespace + key;
+  noFallbackToCookie = noFallbackToCookie || false;
+  var canFallbackToCookie = !noFallbackToCookie;
+  var lsSupport = false;
+  var data; // Check for native support
+
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("testLocal", "" + true);
+      lsSupport = true;
+    }
+  } catch (e) {
+    lsSupport = false;
+  } // If value is detected, set new or modify store
+
+
+  if (typeof value !== "undefined" && value !== null) {
+    value = serializer_1.serialize(value); // Set the store
+
+    if (lsSupport) {
+      // Native support
+      localStorage.setItem(key, value);
+    } else if (canFallbackToCookie) {
+      // Use Cookie
+      createCookie(key, value, 30);
+    }
+  } // No value supplied, return value
+
+
+  if (typeof value === "undefined") {
+    // Get value
+    if (lsSupport) {
+      // Native support
+      data = localStorage.getItem(key);
+    } else if (canFallbackToCookie) {
+      // Use cookie
+      data = readCookie(key);
+    }
+
+    return serializer_1.deserialize(data);
+  } // Null specified, remove store
+
+
+  if (value === null) {
+    if (lsSupport) {
+      // Native support
+      localStorage.removeItem(key);
+    } else if (canFallbackToCookie) {
+      // Use cookie
+      createCookie(key, "", -1);
+    }
+  }
+}
+
+exports.store = store;
+/**
+ * Creates new cookie or removes cookie with negative expiration
+ * @param  key       The key or identifier for the store
+ * @param  value     Contents of the store
+ * @param  exp       Expiration - creation defaults to 30 days
+ */
+
+function createCookie(key, value, exp) {
+  var date = new Date();
+  date.setTime(date.getTime() + exp * 24 * 60 * 60 * 1000);
+  var expires = "; expires=" + date.toUTCString();
+  document.cookie = key + "=" + value + expires + "; path=/";
+}
+/**
+ * Returns contents of cookie
+ * @param  key       The key or identifier for the store
+ */
+
+
+function readCookie(key) {
+  var nameEQ = key + "=";
+  var ca = document.cookie.split(";");
+
+  for (var i = 0, max = ca.length; i < max; i++) {
+    var c = ca[i];
+
+    while (c.charAt(0) === " ") {
+      c = c.substring(1, c.length);
+    }
+
+    if (c.indexOf(nameEQ) === 0) {
+      return c.substring(nameEQ.length, c.length);
+    }
+  }
+
+  return null;
+}
+
+function setToken(token) {
+  store("cly_token", token);
+}
+
+exports.setToken = setToken;
+
+function getToken() {
+  var token = store("cly_token");
+  store("cly_token", null);
+  return token;
+}
+
+window.addEventListener("storage", function (e) {
+  var key = e.key + "";
+
+  switch (key) {
+    //queue of requests
+    case configs_1.Config.namespace + "request_queue_data":
+      var requestQueue = serializer_1.deserialize(e.newValue || "[]");
+      queueWrapper_1.setRequestQueue(requestQueue);
+      break;
+    //queue of events
+
+    case configs_1.Config.namespace + "event_queue_data":
+      var eventQueue = serializer_1.deserialize(e.newValue || "[]");
+      queueWrapper_1.setEventQueue(eventQueue);
+      break;
+
+    case configs_1.Config.namespace + "cly_remote_configs":
+      var remoteConfigs = serializer_1.deserialize(e.newValue || "{}");
+      configWrapper_1.setRemoteConfigs(remoteConfigs);
+      break;
+
+    case configs_1.Config.namespace + "ignore_visitor":
+      configs_1.Config.ignore_visitor = serializer_1.deserialize(e.newValue);
+      break;
+
+    case configs_1.Config.namespace + "cly_id":
+      configs_1.Config.device_id = serializer_1.deserialize(e.newValue);
+      break;
+
+    default: // do nothing
+
+  }
+});
+},{"../helpers/serializer":"core/helpers/serializer.ts","../configs":"core/configs.ts","../queues/queueWrapper":"core/queues/queueWrapper.ts","../configWrapper":"core/configWrapper.ts"}],"core/helpers/uuid.ts":[function(require,module,exports) {
+"use strict";
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.getId = void 0;
+
+var store_1 = require("../store/store");
+
+var configs_1 = require("../configs"); //get ID
+
+
+function getId() {
+  return store_1.store("cly_id") || generateUUID();
+}
+
+exports.getId = getId; //generate UUID
+
+function generateUUID() {
+  var d = new Date().getTime();
+  var uuid = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
+    var r = (d + Math.random() * 16) % 16 | 0;
+    d = Math.floor(d / 16);
+    return (c === "x" ? r : r & 0x3 | 0x8).toString(16);
+  });
+  return uuid;
+}
+
+function isUUID() {
+  return /[0-9a-fA-F]{8}\-[0-9a-fA-F]{4}\-4[0-9a-fA-F]{3}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{12}/.test(configs_1.Config.device_id);
+}
+},{"../store/store":"core/store/store.ts","../configs":"core/configs.ts"}],"core/configs.ts":[function(require,module,exports) {
+"use strict";
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.Config = exports.DefaultConfig = void 0;
+
+var store_1 = require("./store/store");
+
+var utils_1 = require("./helpers/utils");
+
+var uuid_1 = require("./helpers/uuid");
+
+var logger_1 = require("./logger");
+
+var cdlxContext_1 = require("../cdlxContext");
+
+var queueWrapper_1 = require("./queues/queueWrapper");
+/*
+* @param {Object} conf - Cdlx initialization {@link Init} object with configuration options
+   * @param {string} conf.app_key - app key for your app created in Cdlx
+   * @param {string} conf.device_id - to identify a visitor, will be auto generated if not provided
+   * @param {string} conf.url - your Cdlx server url, you can use your server URL or IP here
+   * @param {string} [conf.app_version=0.0] - the version of your app or website
+   * @param {string=} conf.country_code - country code for your visitor
+   * @param {string=} conf.city - name of the city of your visitor
+   * @param {string=} conf.ip_address - ip address of your visitor
+   * @param {boolean} [conf.debug=false] - output debug info into console
+   * @param {boolean} [conf.ignore_bots=true] - option to ignore traffic from bots
+   * @param {number} [conf.interval=500] - set an interval how often to check if there is any data to report and report it in miliseconds
+   * @param {number} [conf.queue_size=1000] - maximum amount of queued requests to store
+   * @param {number} [conf.fail_timeout=60] - set time in seconds to wait after failed connection to server in seconds
+   * @param {number} [conf.inactivity_time=20] - after how many minutes user should be counted as inactive, if he did not perform any actions, as mouse move, scroll or keypress
+   * @param {number} [conf.session_update=60] - how often in seconds should session be extended
+   * @param {number} [conf.max_events=10] - maximum amount of events to send in one batch
+   * @param {number} [conf.max_logs=100] - maximum amount of breadcrumbs to store for crash logs
+   * @param {array=} conf.ignore_referrers - array with referrers to ignore
+   * @param {boolean} [conf.ignore_prefetch=true] - ignore prefetching and pre rendering from counting as real website visits
+   * @param {boolean} [conf.force_post=false] - force using post method for all requests
+   * @param {boolean} [conf.ignore_visitor=false] - ignore this current visitor
+   * @param {boolean} [conf.require_consent=false] - Pass true if you are implementing GDPR compatible consent management. It would prevent running any functionality without proper consent
+   * @param {boolean} [conf.utm={"source":true, "medium":true, "campaign":true, "term":true, "content":true}] - Object instructing which UTM parameters to track
+   * @param {boolean} [conf.use_session_cookie=true] - Use cookie to track session
+   * @param {number} [conf.session_cookie_timeout=30] - How long till cookie session should expire in minutes
+   * @param {boolean|function} [conf.remote_config=false] - Enable automatic remote config fetching, provide callback function to be notified when fetching done
+   * @param {string=} [conf.namespace=""] - Have separate namespace of of persistant data
+   * @param {Object=} [conf.metrics={}] - provide metrics for this user, or else will try to collect what's possible
+   * @param {string} conf.metrics._os - name of platform/operating system
+   * @param {string} conf.metrics._os_version - version of platform/operating system
+   * @param {string} conf.metrics._device - device name
+   * @param {string} conf.metrics._resolution - screen resolution of the device
+   * @param {string} conf.metrics._carrier - carrier or operator used for connection
+   * @param {string} conf.metrics._density - screen density of the device
+   * @param {string} conf.metrics._locale - locale or language of the device in ISO format
+   * @param {string} conf.metrics._store - source from where the user came from
+   * @param {string} conf.metrics._browser - browser name
+   * @param {string} conf.metrics._browser_version - browser version
+   * @param {string} conf.metrics._ua - user agent string
+   * @param {Object=} [conf.headers={}] - Object to override or add headers to all SDK requests
+   
+*/
+
+
+var DefaultConfig =
+/** @class */
+function () {
+  function DefaultConfig() {}
+
+  DefaultConfig.apiPath = "/i";
+  DefaultConfig.readPath = "/o/sdk";
+  DefaultConfig.beatIntervalInMS = 1000;
+  DefaultConfig.queueSize = 1000; //TODO: Rename to maxQueueSize
+
+  DefaultConfig.remoteConfigs = {}; // Wait for seconds, incase of api post failure
+
+  DefaultConfig.failTimeoutAmount = 60;
+  DefaultConfig.inactivityTime = 20;
+  DefaultConfig.sessionUpdate = 60;
+  DefaultConfig.maxEventBatch = 10;
+  DefaultConfig.maxCrashLogs = 100; //TODO: Can be removed
+
+  DefaultConfig.maxAttemptsForHeartBeatCrashes = 3;
+  DefaultConfig.useSessionCookie = true;
+  DefaultConfig.sessionCookieTimeout = 30; // static readonly lastMsTs = 0;
+
+  DefaultConfig.offlineMode = false;
+  DefaultConfig.urlParseRE = /^(((([^:\/#\?]+:)?(?:(\/\/)((?:(([^:@\/#\?]+)(?:\:([^:@\/#\?]+))?)@)?(([^:\/#\?\]\[]+|\[[^\/\]@#?]+\])(?:\:([0-9]+))?))?)?)?((\/?(?:[^\/\?#]+\/+)*)([^\?#]*)))?(\?[^#]+)?)(#.*)?/;
+  DefaultConfig.searchBotRE = /(CdlxSiteBot|nuhk|Googlebot|GoogleSecurityScanner|Yammybot|Openbot|Slurp|MSNBot|Ask Jeeves\/Teoma|ia_archiver|bingbot|Google Web Preview|Mediapartners-Google|AdsBot-Google|Baiduspider|Ezooms|YahooSeeker|AltaVista|AVSearch|Mercator|Scooter|InfoSeek|Ultraseek|Lycos|Wget|YandexBot|Yandex|YaDirectFetcher|SiteBot|Exabot|AhrefsBot|MJ12bot|TurnitinBot|magpie-crawler|Nutch Crawler|CMS Crawler|rogerbot|Domnutch|ssearch_bot|XoviBot|netseer|digincore|fr-crawler|wesee|AliasIO|contxbot|PingdomBot|BingPreview|HeadlessChrome)/; // Use this array of regex to ignore pages while implicitly tracking views.
+
+  DefaultConfig.pagesToIgnoreWhileViewTracking = [];
+  DefaultConfig.isPureConsentBased = true;
+  return DefaultConfig;
+}();
+
+exports.DefaultConfig = DefaultConfig;
+
+var Config =
+/** @class */
+function () {
+  function Config() {
+    this.isPureConsentBased = false;
+    this.postAsRequestBody = true;
+  }
+
+  Config.prototype.initConfig = function (ob) {
+    ob = ob || {};
+    this.namespace = this.getConfig("namespace", ob, ""); // this.timedEvents = {};
+
+    var requestQueue = store_1.store("request_queue_data") || [];
+    queueWrapper_1.setRequestQueue(requestQueue);
+    var eventQueue = store_1.store("event_queue_data") || [];
+    queueWrapper_1.setEventQueue(eventQueue);
+    this.remoteConfigs = store_1.store("cly_remote_configs") || {};
+    this.beatIntervalInMS = this.getConfig("interval", ob, DefaultConfig.beatIntervalInMS);
+    this.queueSize = this.getConfig("queue_size", ob, DefaultConfig.queueSize);
+    this.offlineMode = this.getConfig("offline_mode", ob, DefaultConfig.offlineMode);
+    this.failTimeoutAmount = this.getConfig("fail_timeout", ob, DefaultConfig.failTimeoutAmount);
+    this.inactivityTime = this.getConfig("inactivity_time", ob, DefaultConfig.inactivityTime);
+    this.sessionUpdate = this.getConfig("session_update", ob, DefaultConfig.sessionUpdate);
+    this.maxEventBatch = this.getConfig("max_events", ob, DefaultConfig.maxEventBatch);
+    this.maxCrashLogs = this.getConfig("max_logs", ob, DefaultConfig.maxCrashLogs);
+    this.useSessionCookie = this.getConfig("use_session_cookie", ob, DefaultConfig.useSessionCookie);
+    this.sessionCookieTimeout = this.getConfig("session_cookie_timeout", ob, DefaultConfig.sessionCookieTimeout);
+    this.ignore_prefetch = this.getConfig("ignore_prefetch", ob, true);
+    this.debug = this.getConfig("debug", ob, false);
+    this.app_key = this.getConfig("app_key", ob, null);
+    this.metrics = this.getConfig("metrics", ob, {});
+    this.headers = this.getConfig("headers", ob, {});
+    this.consentsAllowed = this.getConfig("consentsAllowed", ob, null);
+    this.isPureConsentBased = this.getConfig("isPureConsentBased", ob, DefaultConfig.isPureConsentBased);
+    this.device_id = this.getConfig("device_id", ob, uuid_1.getId()); // if (!DefaultConfig.offlineMode) {
+    //   this.device_id = this.getConfig("device_id", ob, getId());
+    // } else if (!this.device_id) {
+    //   this.device_id = "[CLY]_temp_id";
+    // }
+
+    this.url = utils_1.stripTrailingSlash(this.getConfig("url", ob, ""));
+    this.app_version = this.getConfig("app_version", ob, "0.0");
+    this.ignore_bots = this.getConfig("ignore_bots", ob, true);
+    this.force_post = this.getConfig("force_post", ob, false);
+    this.remote_config = this.getConfig("remote_config", ob, false);
+    this.ignore_visitor = this.getConfig("ignore_visitor", ob, false);
+    this.require_consent = this.getConfig("require_consent", ob, false);
+
+    if (ob.ignore_referrers && Array.isArray(ob.ignore_referrers)) {
+      this.ignoreReferrers = ob.ignore_referrers;
+    } // if (ob.ignore_referrers && Array.isArray(ob.ignore_referrers)) {
+    //   this.ignoreReferrers = ob.ignore_referrers;
+    // } else if (this.ignore_referrers && Array.isArray(this.ignore_referrers)) {
+    //   ignoreReferrers = Cdlx.ignore_referrers;
+    // }
+
+
+    if (this.url === "") {
+      logger_1.Logger.log("Please provide server URL");
+      this.ignore_visitor = true;
+    }
+
+    if (store_1.store("ignore_visitor")) {
+      //opted out user
+      this.ignore_visitor = true;
+    }
+
+    this.postAsRequestBody = this.getConfig("postAsRequestBody", ob, true);
+    this.pagesToIgnoreWhileViewTracking = this.getConfig("pages_to_ignore_while_view_tracking", ob, DefaultConfig.pagesToIgnoreWhileViewTracking);
+  };
+
+  Config.prototype.getConfig = function (key, ob, defaultValue) {
+    if (typeof ob[key] !== "undefined") {
+      return ob[key];
+    }
+
+    if (typeof cdlxContext_1.Cdlx[key] !== "undefined") {
+      return cdlxContext_1.Cdlx[key];
+    }
+
+    return defaultValue;
+  };
+
+  return Config;
+}();
+
+var config = new Config();
+exports.Config = config;
+},{"./store/store":"core/store/store.ts","./helpers/utils":"core/helpers/utils.ts","./helpers/uuid":"core/helpers/uuid.ts","./logger":"core/logger/index.ts","../cdlxContext":"cdlxContext.ts","./queues/queueWrapper":"core/queues/queueWrapper.ts"}],"core/eventUtils.ts":[function(require,module,exports) {
+"use strict";
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.push_events = void 0;
 
 var configs_1 = require("./configs");
 
 var logger_1 = require("./logger");
-
-var utils_1 = require("./helpers/utils");
 
 var consent_1 = require("./consents/consent");
 
@@ -407,40 +975,7 @@ var queueWrapper_1 = require("./queues/queueWrapper");
 
 function push_events(event) {
   if (!consent_1.Consent.check_consent("events")) {
-    logger_1.Logger.log("Must pro consent to 'events' for adding events: ", event);
-    return;
-  } //ignore bots
-
-
-  if (configs_1.Config.ignore_visitor) {
-    return;
-  }
-
-  if (!event.key) {
-    logger_1.Logger.log("Event must have key property");
-    return;
-  }
-
-  if (!event.count) {
-    event.count = 1;
-  }
-
-  var props = ["key", "count", "sum", "dur", "segmentation"];
-  var e = utils_1.getProperties(event, props);
-  e.timestamp = utils_1.getMsTimestamp();
-  var date = new Date();
-  e.hour = date.getHours();
-  e.dow = date.getDay();
-  queueWrapper_1.eventQueue.push(e);
-  store_1.store("event_queue_data", queueWrapper_1.eventQueue);
-  logger_1.Logger.log("Adding event: ", event);
-}
-
-exports.push_events = push_events;
-
-function push_custom_events(event) {
-  if (!consent_1.Consent.check_consent("events")) {
-    logger_1.Logger.log("Must pro consent to 'events' for adding events: ", event);
+    logger_1.Logger.log("Must provide consent to 'events' for adding events: ", event);
     return;
   } //ignore bots
 
@@ -448,27 +983,28 @@ function push_custom_events(event) {
   if (configs_1.Config.ignore_visitor) {
     return;
   } // if (!event.key) {
-  //     Logger.log("Event must have key property");
-  //     return;
+  //   Logger.log("Event must have key property");
+  //   return;
   // }
 
 
   if (!event.count) {
     event.count = 1;
-  }
+  } // let props = ["key", "count", "sum", "dur", "segmentation"];
+  // let e = getProperties(event, props);
+
 
   var e = event;
-  e.timestamp = utils_1.getMsTimestamp();
   var date = new Date();
-  e.hour = date.getHours();
-  e.dow = date.getDay();
+  e.date = date;
+  e.timestamp = date.getTime();
   queueWrapper_1.eventQueue.push(e);
   store_1.store("event_queue_data", queueWrapper_1.eventQueue);
   logger_1.Logger.log("Adding event: ", event);
 }
 
-exports.push_custom_events = push_custom_events;
-},{"./configs":"core/configs.ts","./logger":"core/logger/index.ts","./helpers/utils":"core/helpers/utils.ts","./consents/consent":"core/consents/consent.ts","./store/store":"core/store/store.ts","./queues/queueWrapper":"core/queues/queueWrapper.ts"}],"core/browser/browserUtls.ts":[function(require,module,exports) {
+exports.push_events = push_events;
+},{"./configs":"core/configs.ts","./logger":"core/logger/index.ts","./consents/consent":"core/consents/consent.ts","./store/store":"core/store/store.ts","./queues/queueWrapper":"core/queues/queueWrapper.ts"}],"core/browser/browserUtls.ts":[function(require,module,exports) {
 "use strict";
 
 Object.defineProperty(exports, "__esModule", {
@@ -681,18 +1217,6 @@ var UserData =
 /** @class */
 function () {
   function UserData() {
-    /**************************
-     * Modifying custom property values of user details
-     * Possible modification commands
-     *  - inc, to increment existing value by provided value
-     *  - mul, to multiply existing value by provided value
-     *  - max, to select maximum value between existing and provided value
-     *  - min, to select minimum value between existing and provided value
-     *  - setOnce, to set value only if it was not set before
-     *  - push, creates an array property, if property does not exist, and adds value to array
-     *  - pull, to remove value from array property
-     *  - addToSet, creates an array property, if property does not exist, and adds unique value to array, only if it does not yet exist in array
-     **************************/
     this.customData = {};
   }
   /**
@@ -819,6 +1343,19 @@ function () {
 
     this.customData = {};
   };
+  /**************************
+   * Modifying custom property values of user details
+   * Possible modification commands
+   *  - inc, to increment existing value by provided value
+   *  - mul, to multiply existing value by provided value
+   *  - max, to select maximum value between existing and provided value
+   *  - min, to select minimum value between existing and provided value
+   *  - setOnce, to set value only if it was not set before
+   *  - push, creates an array property, if property does not exist, and adds value to array
+   *  - pull, to remove value from array property
+   *  - addToSet, creates an array property, if property does not exist, and adds unique value to array, only if it does not yet exist in array
+   **************************/
+
 
   UserData.prototype.change_custom_property = function (key, value, mod) {
     if (consent_1.Consent.check_consent("users")) {
@@ -843,40 +1380,7 @@ function () {
 
 var userData = new UserData();
 exports.UserData = userData;
-},{"../consents/consent":"core/consents/consent.ts","../helpers/utils":"core/helpers/utils.ts","../queues/queueWrapper":"core/queues/queueWrapper.ts"}],"core/configWrapper.ts":[function(require,module,exports) {
-"use strict";
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.getRemoteConfigs = exports.setRemoteConfigs = exports.isOfflineMode = exports.isDebug = void 0;
-
-var configs_1 = require("./configs");
-
-function isDebug() {
-  return configs_1.Config.debug;
-}
-
-exports.isDebug = isDebug;
-
-function isOfflineMode() {
-  return configs_1.Config.offlineMode;
-}
-
-exports.isOfflineMode = isOfflineMode;
-
-function setRemoteConfigs(remoteConfigs) {
-  configs_1.Config.remoteConfigs = remoteConfigs;
-}
-
-exports.setRemoteConfigs = setRemoteConfigs;
-
-function getRemoteConfigs() {
-  return configs_1.Config.remoteConfigs;
-}
-
-exports.getRemoteConfigs = getRemoteConfigs;
-},{"./configs":"core/configs.ts"}],"core/helpers/httpHelpers.ts":[function(require,module,exports) {
+},{"../consents/consent":"core/consents/consent.ts","../helpers/utils":"core/helpers/utils.ts","../queues/queueWrapper":"core/queues/queueWrapper.ts"}],"core/helpers/httpHelpers.ts":[function(require,module,exports) {
 "use strict";
 
 function _typeof(obj) { "@babel/helpers - typeof"; if (typeof Symbol === "function" && typeof Symbol.iterator === "symbol") { _typeof = function _typeof(obj) { return typeof obj; }; } else { _typeof = function _typeof(obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }; } return _typeof(obj); }
@@ -1264,7 +1768,7 @@ function change_id(newId, merge) {
       }
     } else {
       //start new session for new id
-      sessionUtils_1.Session.begin_session(!configs_1.DefaultConfig.autoExtend, true);
+      sessionUtils_1.Session.begin_session(!sessionUtils_1.Session.autoExtend, true);
     }
 
     if (configs_1.Config.remote_config) {
@@ -1381,6 +1885,7 @@ function () {
     this.readyToProcess = true;
     this.failTimeout = 0;
     this.hasPulse = false;
+    this.errorCount = 0;
   } // TODO: Make sure this won't get triggered more than once.
   // i.e if there is a heartbeat monitor running then
   // we should't put another in action.
@@ -1389,33 +1894,42 @@ function () {
   HeartBeat.prototype.heartBeat = function () {
     var _this = this;
 
-    misc_1.notifyLoaders(); // ignore bots
+    try {
+      misc_1.notifyLoaders(); // ignore bots
 
-    if (configs_1.Config.test_mode || configs_1.Config.ignore_visitor) {
-      this.hasPulse = false;
-      return;
+      if (configs_1.Config.ignore_visitor) {
+        this.hasPulse = false;
+        return;
+      }
+
+      this.hasPulse = true; // process queue, this will get triggered when using in asynchronous model
+
+      if (typeof cdlxContext_1.Cdlx.q !== "undefined" && cdlxContext_1.Cdlx.q.length > 0) {
+        // 1. Get All events from Cdlx.q into a local queue.
+        var asyncQueueSnapshot = cdlxContext_1.Cdlx.q; // 2. clear the Cdlx.q
+
+        cdlxContext_1.Cdlx.q = []; // 3. process the queued calls from the local queue.
+
+        this.handleEventQueueSnapshot(asyncQueueSnapshot);
+      } //extend session if needed
+
+
+      this.extendSessionIfNeeded(); //process event queue, this splits eventQueue Data into batches and pushes into requestQueue (Ready to be sent for CollectorAPI).
+
+      this.processEventQueue(); //process request queue with event queue
+
+      this.processRequestQueueWithEventQueueData();
+      this.errorCount = 0;
+    } catch (error) {
+      this.errorCount++;
+      console.error("error in the heartbeat of tracker", this.errorCount, error);
+    } finally {
+      if (this.errorCount < configs_1.DefaultConfig.maxAttemptsForHeartBeatCrashes) {
+        setTimeout(function () {
+          _this.heartBeat();
+        }, configs_1.DefaultConfig.beatIntervalInMS);
+      }
     }
-
-    this.hasPulse = true; // process queue, this will get triggered when using in asynchronous model
-
-    if (typeof cdlxContext_1.Cdlx.q !== "undefined" && cdlxContext_1.Cdlx.q.length > 0) {
-      // 1. Get All events from Cdlx.q into a local queue.
-      var asyncQueueSnapshot = cdlxContext_1.Cdlx.q; // 2. clear the Cdlx.q
-
-      cdlxContext_1.Cdlx.q = []; // 3. process the queued calls from the local queue.
-
-      this.handleEventQueueSnapshot(asyncQueueSnapshot);
-    } //extend session if needed
-
-
-    this.extendSessionIfNeeded(); //process event queue
-
-    this.processEventQueue(); //process request queue with event queue
-
-    this.processRequestQueueWithEventQueueData();
-    setTimeout(function () {
-      _this.heartBeat();
-    }, configs_1.DefaultConfig.beatIntervalInMS);
   };
 
   HeartBeat.prototype.handleEventQueueSnapshot = function (asyncQueueSnapshot) {
@@ -1448,7 +1962,7 @@ function () {
   };
 
   HeartBeat.prototype.extendSessionIfNeeded = function () {
-    if (sessionUtils_1.Session.sessionStarted && configs_1.DefaultConfig.autoExtend && sessionUtils_1.Session.trackTime) {
+    if (sessionUtils_1.Session.sessionStarted && sessionUtils_1.Session.autoExtend && sessionUtils_1.Session.trackTime) {
       var last = utils_1.getTimestamp();
 
       if (last - this.lastBeat > configs_1.DefaultConfig.sessionUpdate) {
@@ -1490,15 +2004,16 @@ function () {
 
   HeartBeat.prototype.processRequestQueueWithEventQueueData = function () {
     var _this = this; // TODO: we can make it a loop untill all elements in the requestQueue. (not a must needed)
+    // i.e. must finish all the messages in requestQueue unless there is an error.
 
 
     if (!configWrapper_1.isOfflineMode() && queueWrapper_1.requestQueue.length > 0 && this.readyToProcess && utils_1.getTimestamp() > this.failTimeout) {
       this.readyToProcess = false;
-      var params = queueWrapper_1.requestQueue[0];
+      var requestItemToPost = queueWrapper_1.requestQueue[0];
       consent_1.Consent.checkIfAnyConsentToSync();
-      logger_1.Logger.log("Processing request", params);
+      logger_1.Logger.log("Processing request", requestItemToPost);
       store_1.store("request_queue_data", queueWrapper_1.requestQueue, true);
-      httpHelpers_1.sendXmlHttpRequest(configs_1.Config.url + configs_1.DefaultConfig.apiPath, params, function (err, params) {
+      httpHelpers_1.sendXmlHttpRequest(configs_1.Config.url + configs_1.DefaultConfig.apiPath, requestItemToPost, function (err, params) {
         logger_1.Logger.log("Request Finished", params, err);
 
         if (err) {
@@ -1556,7 +2071,7 @@ var SessionEntity =
 function () {
   function SessionEntity() {
     this.sessionStarted = false;
-    this.useSessionCookie = true;
+    this.autoExtend = true;
     this.trackTime = true;
     this.storedDuration = 0;
     this.lastViewStoredDuration = 0;
@@ -1583,7 +2098,7 @@ function () {
         this.autoExtend = noHeartBeat ? false : true;
         var expire = store_1.store("cly_session");
 
-        if (force || !this.useSessionCookie || !expire || parseInt(expire) <= utils_1.getTimestamp()) {
+        if (force || !configs_1.Config.useSessionCookie || !expire || parseInt(expire) <= utils_1.getTimestamp()) {
           logger_1.Logger.log("Session started");
           var req = {};
           req.begin_session = 1;
@@ -1628,7 +2143,7 @@ function () {
         sec = sec || utils_1.getTimestamp() - heartBeat_1.HeartBeat.getLastBeat();
         this.reportViewDuration();
 
-        if (!this.useSessionCookie || force) {
+        if (!configs_1.Config.useSessionCookie || force) {
           logger_1.Logger.log("Ending session");
           queueWrapper_1.toRequestQueue({
             end_session: 1,
@@ -1689,7 +2204,7 @@ function () {
 
 
   SessionEntity.prototype.extendSession = function () {
-    if (this.useSessionCookie) {
+    if (configs_1.Config.useSessionCookie) {
       //if session expired, we should start a new one
       var expire = store_1.store("cly_session");
 
@@ -1813,14 +2328,14 @@ function () {
             var lastParams = globalContext_1.GlobalContext.getLastParams();
 
             if (feature === "sessions" && lastParams.begin_session) {
-              sessionUtils_1.Session.begin_session(globalContext_1.GlobalContext.getLastParams().begin_session); // this.begin_session.apply(Cdlx, GlobalContext.lastParams.begin_session);
+              sessionUtils_1.Session.begin_session(lastParams.begin_session); // this.begin_session.apply(Cdlx, GlobalContext.lastParams.begin_session);
 
               lastParams.begin_session = null;
             } else if (feature === "views" && lastParams.track_pageview) {
               // lastView = null;
               sessionUtils_1.Session.lastView = null; // todo.track_pageview.apply(Cdlx, lastParams.track_pageview);
 
-              sessionUtils_1.Session.begin_session(globalContext_1.GlobalContext.getLastParams().track_pageview);
+              sessionUtils_1.Session.begin_session(lastParams.track_pageview);
               lastParams.track_pageview = null;
             }
 
@@ -1908,548 +2423,7 @@ function () {
 
 var consent = new Consents();
 exports.Consent = consent;
-},{"../configs":"core/configs.ts","../logger":"core/logger/index.ts","../../globalContext":"globalContext.ts","../queues/queueWrapper":"core/queues/queueWrapper.ts","../helpers/utils":"core/helpers/utils.ts","../sessionUtils":"core/sessionUtils.ts"}],"core/globals.ts":[function(require,module,exports) {
-"use strict";
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-
-var Globals =
-/** @class */
-function () {
-  function Globals() {}
-
-  Globals.SDK_VERSION = "20.04";
-  Globals.SDK_NAME = "javascript_native_web";
-  /**
-   * Array with list of available features that you can require consent for
-   */
-
-  Globals.features = ["sessions", "events", "views", "scrolls", "clicks", "forms", "crashes", "attribution", "users", "star-rating", "location", "apm"];
-  return Globals;
-}();
-
-exports.default = Globals;
-},{}],"core/requestBuilder.ts":[function(require,module,exports) {
-"use strict";
-
-var __importDefault = this && this.__importDefault || function (mod) {
-  return mod && mod.__esModule ? mod : {
-    "default": mod
-  };
-};
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.prepareRequest = void 0;
-
-var configs_1 = require("./configs");
-
-var consent_1 = require("./consents/consent");
-
-var utils_1 = require("./helpers/utils");
-
-var globals_1 = __importDefault(require("./globals")); //prepare request by adding basic info to it
-
-
-function prepareRequest(request) {
-  request.app_key = configs_1.Config.app_key;
-  request.device_id = configs_1.Config.device_id;
-  request.sdk_name = globals_1.default.SDK_NAME;
-  request.sdk_version = globals_1.default.SDK_VERSION;
-
-  if (consent_1.Consent.check_consent("location")) {
-    if (configs_1.Config.country_code) {
-      request.country_code = configs_1.Config.country_code;
-    }
-
-    if (configs_1.Config.city) {
-      request.city = configs_1.Config.city;
-    }
-
-    if (configs_1.Config.ip_address !== null) {
-      request.ip_address = configs_1.Config.ip_address;
-    }
-  } else {
-    request.location = "";
-  }
-
-  request.timestamp = utils_1.getMsTimestamp();
-  var date = new Date();
-  request.hour = date.getHours();
-  request.dow = date.getDay();
-}
-
-exports.prepareRequest = prepareRequest;
-},{"./configs":"core/configs.ts","./consents/consent":"core/consents/consent.ts","./helpers/utils":"core/helpers/utils.ts","./globals":"core/globals.ts"}],"core/queues/queueWrapper.ts":[function(require,module,exports) {
-"use strict";
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.toRequestQueue = exports.getRequestQueue = exports.getEventQueue = exports.setRequestQueue = exports.setEventQueue = exports.requestQueue = exports.eventQueue = void 0;
-
-var configs_1 = require("../configs");
-
-var logger_1 = require("../logger");
-
-var store_1 = require("../store/store");
-
-var requestBuilder_1 = require("../requestBuilder");
-
-exports.eventQueue = [];
-exports.requestQueue = [];
-
-function setEventQueue(request) {
-  exports.eventQueue = request;
-}
-
-exports.setEventQueue = setEventQueue;
-
-function setRequestQueue(request) {
-  exports.requestQueue = request;
-}
-
-exports.setRequestQueue = setRequestQueue;
-
-function getEventQueue() {
-  return exports.eventQueue;
-}
-
-exports.getEventQueue = getEventQueue;
-
-function getRequestQueue() {
-  return exports.requestQueue;
-}
-
-exports.getRequestQueue = getRequestQueue; //insert request to queue
-
-function toRequestQueue(request) {
-  if (configs_1.Config.ignore_visitor) {
-    return;
-  }
-
-  if (!configs_1.Config.app_key || !configs_1.Config.device_id) {
-    logger_1.Logger.log("app_key or device_id is missing");
-    return;
-  }
-
-  requestBuilder_1.prepareRequest(request);
-
-  if (exports.requestQueue.length > configs_1.Config.queueSize) {
-    exports.requestQueue.shift();
-  }
-
-  exports.requestQueue.push(request);
-  store_1.store("request_queue_data", exports.requestQueue, true);
-}
-
-exports.toRequestQueue = toRequestQueue;
-},{"../configs":"core/configs.ts","../logger":"core/logger/index.ts","../store/store":"core/store/store.ts","../requestBuilder":"core/requestBuilder.ts"}],"core/store/store.ts":[function(require,module,exports) {
-"use strict";
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.setToken = exports.store = void 0;
-
-var serializer_1 = require("../helpers/serializer");
-
-var configs_1 = require("../configs");
-
-var queueWrapper_1 = require("../queues/queueWrapper");
-
-var configWrapper_1 = require("../configWrapper");
-/**
- * Simple localStorage with Cookie Fallback
- * v.1.0.0
- *
- * USAGE:
- * ----------------------------------------
- * Set New / Modify:
- *   store("my_key", "some_value");
- *
- * Retrieve:
- *   store("my_key");
- *
- * Delete / Remove:
- *   store("my_key", null);
- */
-
-
-function store(key, value, noFallbackToCookie) {
-  //apply namespace
-  key = configs_1.Config.namespace + key;
-  noFallbackToCookie = noFallbackToCookie || false;
-  var canFallbackToCookie = !noFallbackToCookie;
-  var lsSupport = false;
-  var data; // Check for native support
-
-  try {
-    if (typeof localStorage !== "undefined") {
-      localStorage.setItem("testLocal", "" + true);
-      lsSupport = true;
-    }
-  } catch (e) {
-    lsSupport = false;
-  } // If value is detected, set new or modify store
-
-
-  if (typeof value !== "undefined" && value !== null) {
-    value = serializer_1.serialize(value); // Set the store
-
-    if (lsSupport) {
-      // Native support
-      localStorage.setItem(key, value);
-    } else if (canFallbackToCookie) {
-      // Use Cookie
-      createCookie(key, value, 30);
-    }
-  } // No value supplied, return value
-
-
-  if (typeof value === "undefined") {
-    // Get value
-    if (lsSupport) {
-      // Native support
-      data = localStorage.getItem(key);
-    } else if (canFallbackToCookie) {
-      // Use cookie
-      data = readCookie(key);
-    }
-
-    return serializer_1.deserialize(data);
-  } // Null specified, remove store
-
-
-  if (value === null) {
-    if (lsSupport) {
-      // Native support
-      localStorage.removeItem(key);
-    } else if (canFallbackToCookie) {
-      // Use cookie
-      createCookie(key, "", -1);
-    }
-  }
-}
-
-exports.store = store;
-/**
- * Creates new cookie or removes cookie with negative expiration
- * @param  key       The key or identifier for the store
- * @param  value     Contents of the store
- * @param  exp       Expiration - creation defaults to 30 days
- */
-
-function createCookie(key, value, exp) {
-  var date = new Date();
-  date.setTime(date.getTime() + exp * 24 * 60 * 60 * 1000);
-  var expires = "; expires=" + date.toGMTString(); //TODO:
-
-  document.cookie = key + "=" + value + expires + "; path=/";
-}
-/**
- * Returns contents of cookie
- * @param  key       The key or identifier for the store
- */
-
-
-function readCookie(key) {
-  var nameEQ = key + "=";
-  var ca = document.cookie.split(";");
-
-  for (var i = 0, max = ca.length; i < max; i++) {
-    var c = ca[i];
-
-    while (c.charAt(0) === " ") {
-      c = c.substring(1, c.length);
-    }
-
-    if (c.indexOf(nameEQ) === 0) {
-      return c.substring(nameEQ.length, c.length);
-    }
-  }
-
-  return null;
-}
-
-function setToken(token) {
-  store("cly_token", token);
-}
-
-exports.setToken = setToken;
-
-function getToken() {
-  var token = store("cly_token");
-  store("cly_token", null);
-  return token;
-}
-
-window.addEventListener("storage", function (e) {
-  var key = e.key + "";
-
-  switch (key) {
-    //queue of requests
-    case configs_1.Config.namespace + "request_queue_data":
-      var requestQueue = serializer_1.deserialize(e.newValue || "[]");
-      queueWrapper_1.setRequestQueue(requestQueue);
-      break;
-    //queue of events
-
-    case configs_1.Config.namespace + "event_queue_data":
-      var eventQueue = serializer_1.deserialize(e.newValue || "[]");
-      queueWrapper_1.setEventQueue(eventQueue);
-      break;
-
-    case configs_1.Config.namespace + "cly_remote_configs":
-      var remoteConfigs = serializer_1.deserialize(e.newValue || "{}");
-      configWrapper_1.setRemoteConfigs(remoteConfigs);
-      break;
-
-    case configs_1.Config.namespace + "ignore_visitor":
-      configs_1.Config.ignore_visitor = serializer_1.deserialize(e.newValue);
-      break;
-
-    case configs_1.Config.namespace + "cly_id":
-      configs_1.Config.device_id = serializer_1.deserialize(e.newValue);
-      break;
-
-    default: // do nothing
-
-  }
-});
-},{"../helpers/serializer":"core/helpers/serializer.ts","../configs":"core/configs.ts","../queues/queueWrapper":"core/queues/queueWrapper.ts","../configWrapper":"core/configWrapper.ts"}],"core/helpers/uuid.ts":[function(require,module,exports) {
-"use strict";
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.getId = void 0;
-
-var store_1 = require("../store/store");
-
-var configs_1 = require("../configs"); //get ID
-
-
-function getId() {
-  return store_1.store("cly_id") || generateUUID();
-}
-
-exports.getId = getId; //generate UUID
-
-function generateUUID() {
-  var d = new Date().getTime();
-  var uuid = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
-    var r = (d + Math.random() * 16) % 16 | 0;
-    d = Math.floor(d / 16);
-    return (c === "x" ? r : r & 0x3 | 0x8).toString(16);
-  });
-  return uuid;
-}
-
-function isUUID() {
-  return /[0-9a-fA-F]{8}\-[0-9a-fA-F]{4}\-4[0-9a-fA-F]{3}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{12}/.test(configs_1.Config.device_id);
-}
-},{"../store/store":"core/store/store.ts","../configs":"core/configs.ts"}],"core/configs.ts":[function(require,module,exports) {
-"use strict";
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.Config = exports.DefaultConfig = void 0;
-
-var store_1 = require("./store/store");
-
-var utils_1 = require("./helpers/utils");
-
-var uuid_1 = require("./helpers/uuid");
-
-var logger_1 = require("./logger");
-
-var cdlxContext_1 = require("../cdlxContext");
-/*
-* @param {Object} conf - Cdlx initialization {@link Init} object with configuration options
-   * @param {string} conf.app_key - app key for your app created in Cdlx
-   * @param {string} conf.device_id - to identify a visitor, will be auto generated if not provided
-   * @param {string} conf.url - your Cdlx server url, you can use your server URL or IP here
-   * @param {string} [conf.app_version=0.0] - the version of your app or website
-   * @param {string=} conf.country_code - country code for your visitor
-   * @param {string=} conf.city - name of the city of your visitor
-   * @param {string=} conf.ip_address - ip address of your visitor
-   * @param {boolean} [conf.debug=false] - output debug info into console
-   * @param {boolean} [conf.ignore_bots=true] - option to ignore traffic from bots
-   * @param {number} [conf.interval=500] - set an interval how often to check if there is any data to report and report it in miliseconds
-   * @param {number} [conf.queue_size=1000] - maximum amount of queued requests to store
-   * @param {number} [conf.fail_timeout=60] - set time in seconds to wait after failed connection to server in seconds
-   * @param {number} [conf.inactivity_time=20] - after how many minutes user should be counted as inactive, if he did not perform any actions, as mouse move, scroll or keypress
-   * @param {number} [conf.session_update=60] - how often in seconds should session be extended
-   * @param {number} [conf.max_events=10] - maximum amount of events to send in one batch
-   * @param {number} [conf.max_logs=100] - maximum amount of breadcrumbs to store for crash logs
-   * @param {array=} conf.ignore_referrers - array with referrers to ignore
-   * @param {boolean} [conf.ignore_prefetch=true] - ignore prefetching and pre rendering from counting as real website visits
-   * @param {boolean} [conf.force_post=false] - force using post method for all requests
-   * @param {boolean} [conf.ignore_visitor=false] - ignore this current visitor
-   * @param {boolean} [conf.require_consent=false] - Pass true if you are implementing GDPR compatible consent management. It would prevent running any functionality without proper consent
-   * @param {boolean} [conf.utm={"source":true, "medium":true, "campaign":true, "term":true, "content":true}] - Object instructing which UTM parameters to track
-   * @param {boolean} [conf.use_session_cookie=true] - Use cookie to track session
-   * @param {number} [conf.session_cookie_timeout=30] - How long till cookie session should expire in minutes
-   * @param {boolean|function} [conf.remote_config=false] - Enable automatic remote config fetching, provide callback function to be notified when fetching done
-   * @param {string=} [conf.namespace=""] - Have separate namespace of of persistant data
-   * @param {Object=} [conf.metrics={}] - provide metrics for this user, or else will try to collect what's possible
-   * @param {string} conf.metrics._os - name of platform/operating system
-   * @param {string} conf.metrics._os_version - version of platform/operating system
-   * @param {string} conf.metrics._device - device name
-   * @param {string} conf.metrics._resolution - screen resolution of the device
-   * @param {string} conf.metrics._carrier - carrier or operator used for connection
-   * @param {string} conf.metrics._density - screen density of the device
-   * @param {string} conf.metrics._locale - locale or language of the device in ISO format
-   * @param {string} conf.metrics._store - source from where the user came from
-   * @param {string} conf.metrics._browser - browser name
-   * @param {string} conf.metrics._browser_version - browser version
-   * @param {string} conf.metrics._ua - user agent string
-   * @param {Object=} [conf.headers={}] - Object to override or add headers to all SDK requests
-   
-*/
-
-
-var DefaultConfig =
-/** @class */
-function () {
-  function DefaultConfig() {}
-
-  DefaultConfig.inited = false;
-  DefaultConfig.apiPath = "/i";
-  DefaultConfig.readPath = "/o/sdk";
-  DefaultConfig.beatIntervalInMS = 1000;
-  DefaultConfig.queueSize = 1000;
-  DefaultConfig.requestQueue = [];
-  DefaultConfig.eventQueue = [];
-  DefaultConfig.remoteConfigs = {}; // static readonly timedEvents = {};
-
-  DefaultConfig.autoExtend = true; //   static readonly lastBeat;
-
-  DefaultConfig.storedDuration = 0; //   static readonly lastView = null;
-  // static readonly lastViewTime = 0;
-  // static readonly lastViewStoredDuration = 0;
-  //   static readonly failTimeout = 0;
-
-  DefaultConfig.failTimeoutAmount = 60;
-  DefaultConfig.inactivityTime = 20;
-  DefaultConfig.inactivityCounter = 0; //MOVE:
-
-  DefaultConfig.sessionUpdate = 60;
-  DefaultConfig.maxEventBatch = 10;
-  DefaultConfig.maxCrashLogs = 100; // static readonly useSessionCookie = true; //TODO: handle
-
-  DefaultConfig.sessionCookieTimeout = 30;
-  DefaultConfig.lastMsTs = 0; //   static readonly readyToProcess = true;
-  //   static readonly hasPulse = false;
-
-  DefaultConfig.offlineMode = false; //   static readonly syncConsents = {};
-  //   static readonly lastParams = {};
-
-  DefaultConfig.urlParseRE = /^(((([^:\/#\?]+:)?(?:(\/\/)((?:(([^:@\/#\?]+)(?:\:([^:@\/#\?]+))?)@)?(([^:\/#\?\]\[]+|\[[^\/\]@#?]+\])(?:\:([0-9]+))?))?)?)?((\/?(?:[^\/\?#]+\/+)*)([^\?#]*)))?(\?[^#]+)?)(#.*)?/;
-  DefaultConfig.searchBotRE = /(CdlxSiteBot|nuhk|Googlebot|GoogleSecurityScanner|Yammybot|Openbot|Slurp|MSNBot|Ask Jeeves\/Teoma|ia_archiver|bingbot|Google Web Preview|Mediapartners-Google|AdsBot-Google|Baiduspider|Ezooms|YahooSeeker|AltaVista|AVSearch|Mercator|Scooter|InfoSeek|Ultraseek|Lycos|Wget|YandexBot|Yandex|YaDirectFetcher|SiteBot|Exabot|AhrefsBot|MJ12bot|TurnitinBot|magpie-crawler|Nutch Crawler|CMS Crawler|rogerbot|Domnutch|ssearch_bot|XoviBot|netseer|digincore|fr-crawler|wesee|AliasIO|contxbot|PingdomBot|BingPreview|HeadlessChrome)/;
-  return DefaultConfig;
-}();
-
-exports.DefaultConfig = DefaultConfig;
-
-var Config =
-/** @class */
-function () {
-  function Config() {
-    this.postAsRequestBody = true;
-  }
-
-  Config.prototype.initConfig = function (ob) {
-    ob = ob || {};
-    this.namespace = this.getConfig("namespace", ob, ""); // this.startTime = getTimestamp();
-
-    this.inited = true;
-    this.requestQueue = store_1.store("request_queue_data") || []; // this.timedEvents = {};
-
-    this.eventQueue = store_1.store("event_queue_data") || [];
-    this.remoteConfigs = store_1.store("cly_remote_configs") || {};
-    this.beatIntervalInMS = this.getConfig("interval", ob, DefaultConfig.beatIntervalInMS);
-    this.queueSize = this.getConfig("queue_size", ob, DefaultConfig.queueSize);
-    this.offlineMode = this.getConfig("offline_mode", ob, DefaultConfig.offlineMode);
-    this.failTimeoutAmount = this.getConfig("fail_timeout", ob, DefaultConfig.failTimeoutAmount);
-    this.inactivityTime = this.getConfig("inactivity_time", ob, DefaultConfig.inactivityTime);
-    this.sessionUpdate = this.getConfig("session_update", ob, DefaultConfig.sessionUpdate);
-    this.maxEventBatch = this.getConfig("max_events", ob, DefaultConfig.maxEventBatch);
-    this.maxCrashLogs = this.getConfig("max_logs", ob, DefaultConfig.maxCrashLogs); // this.useSessionCookie = this.getConfig(
-    //   "use_session_cookie",
-    //   ob,
-    //   DefaultConfig.useSessionCookie
-    // );
-
-    this.sessionCookieTimeout = this.getConfig("session_cookie_timeout", ob, DefaultConfig.sessionCookieTimeout);
-    this.ignore_prefetch = this.getConfig("ignore_prefetch", ob, true);
-    this.debug = this.getConfig("debug", ob, false);
-    this.app_key = this.getConfig("app_key", ob, null);
-    this.test_mode = this.getConfig("test_mode", ob, false);
-    this.metrics = this.getConfig("metrics", ob, {});
-    this.headers = this.getConfig("headers", ob, {});
-    this.device_id = this.getConfig("device_id", ob, uuid_1.getId()); // if (!DefaultConfig.offlineMode) {
-    //   this.device_id = this.getConfig("device_id", ob, getId());
-    // } else if (!this.device_id) {
-    //   this.device_id = "[CLY]_temp_id";
-    // }
-
-    this.url = utils_1.stripTrailingSlash(this.getConfig("url", ob, ""));
-    this.app_version = this.getConfig("app_version", ob, "0.0");
-    this.country_code = this.getConfig("country_code", ob, null);
-    this.city = this.getConfig("city", ob, null);
-    this.ip_address = this.getConfig("ip_address", ob, null);
-    this.ignore_bots = this.getConfig("ignore_bots", ob, true);
-    this.force_post = this.getConfig("force_post", ob, false);
-    this.remote_config = this.getConfig("remote_config", ob, false);
-    this.ignore_visitor = this.getConfig("ignore_visitor", ob, false);
-    this.require_consent = this.getConfig("require_consent", ob, false);
-
-    if (ob.ignore_referrers && Array.isArray(ob.ignore_referrers)) {
-      this.ignoreReferrers = ob.ignore_referrers;
-    } // if (ob.ignore_referrers && Array.isArray(ob.ignore_referrers)) {
-    //   this.ignoreReferrers = ob.ignore_referrers;
-    // } else if (this.ignore_referrers && Array.isArray(this.ignore_referrers)) {
-    //   ignoreReferrers = Cdlx.ignore_referrers;
-    // }
-
-
-    if (this.url === "") {
-      logger_1.Logger.log("Please provide server URL");
-      this.ignore_visitor = true;
-    }
-
-    if (store_1.store("ignore_visitor")) {
-      //opted out user
-      this.ignore_visitor = true;
-    }
-
-    this.postAsRequestBody = this.getConfig("postAsRequestBody", ob, true);
-  };
-
-  Config.prototype.getConfig = function (key, ob, defaultValue) {
-    if (typeof ob[key] !== "undefined") {
-      return ob[key];
-    }
-
-    if (typeof cdlxContext_1.Cdlx[key] !== "undefined") {
-      return cdlxContext_1.Cdlx[key];
-    }
-
-    return defaultValue;
-  };
-
-  return Config;
-}();
-
-var config = new Config();
-exports.Config = config;
-},{"./store/store":"core/store/store.ts","./helpers/utils":"core/helpers/utils.ts","./helpers/uuid":"core/helpers/uuid.ts","./logger":"core/logger/index.ts","../cdlxContext":"cdlxContext.ts"}],"core/logger/index.ts":[function(require,module,exports) {
+},{"../configs":"core/configs.ts","../logger":"core/logger/index.ts","../../globalContext":"globalContext.ts","../queues/queueWrapper":"core/queues/queueWrapper.ts","../helpers/utils":"core/helpers/utils.ts","../sessionUtils":"core/sessionUtils.ts"}],"core/logger/index.ts":[function(require,module,exports) {
 "use strict";
 
 function _typeof(obj) { "@babel/helpers - typeof"; if (typeof Symbol === "function" && typeof Symbol.iterator === "symbol") { _typeof = function _typeof(obj) { return typeof obj; }; } else { _typeof = function _typeof(obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }; } return _typeof(obj); }
@@ -2755,7 +2729,7 @@ function track_pageview(page, ignoreList, viewSegments) {
 
   if (consent_1.Consent.check_consent("views")) {
     eventUtils_1.push_events({
-      key: "[CLY]_view",
+      key: "page_view",
       segmentation: segments
     });
   } else {
@@ -2855,7 +2829,541 @@ function createPolyfills() {
 }
 
 exports.createPolyfills = createPolyfills;
-},{}],"initialiser.ts":[function(require,module,exports) {
+},{}],"trackers/implicit/all-clicks.ts":[function(require,module,exports) {
+"use strict";
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.track_all_clicks = void 0;
+
+var domUtils_1 = require("../../core/browser/domUtils");
+
+var consent_1 = require("../../core/consents/consent");
+
+var eventUtils_1 = require("../../core/eventUtils");
+/**
+ * Track all clicks on this page
+ * @param {Object=} parent - DOM object which children to track, by default it is document body
+ **/
+
+
+function track_all_clicks(parent) {
+  parent = parent || document;
+  var shouldProcess = true;
+
+  function processClick(event) {
+    if (shouldProcess) {
+      shouldProcess = false; //cross browser click coordinates
+
+      domUtils_1.get_page_coord(event);
+
+      if (typeof event.pageX !== "undefined" && typeof event.pageY !== "undefined") {
+        var height = domUtils_1.getDocHeight();
+        var width = domUtils_1.getDocWidth(); //record click event
+
+        if (consent_1.Consent.check_consent("all-clicks")) {
+          eventUtils_1.push_events({
+            key: "all-clicks-action",
+            segmentation: {
+              type: "click",
+              x: event.pageX,
+              y: event.pageY,
+              width: width,
+              height: height,
+              domain: window.location.hostname,
+              view: domUtils_1.getViewUrl()
+            }
+          });
+        }
+      }
+
+      setTimeout(function () {
+        shouldProcess = true;
+      }, 1000);
+    }
+  } //add any events you want
+
+
+  domUtils_1.add_dom_event(parent, "click", processClick);
+}
+
+exports.track_all_clicks = track_all_clicks;
+},{"../../core/browser/domUtils":"core/browser/domUtils.ts","../../core/consents/consent":"core/consents/consent.ts","../../core/eventUtils":"core/eventUtils.ts"}],"trackers/implicit/all-links.ts":[function(require,module,exports) {
+"use strict";
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.track_all_links = void 0;
+
+var domUtils_1 = require("../../core/browser/domUtils");
+
+var consent_1 = require("../../core/consents/consent");
+
+var eventUtils_1 = require("../../core/eventUtils");
+/**
+ * Generate custom event for all links that were clicked on this page
+ * @param {Object=} parent - DOM object which children to track, by default it is document body
+ **/
+
+
+function track_all_links(parent) {
+  parent = parent || document;
+
+  function processClick(event) {
+    //get element which was clicked
+    var elem = domUtils_1.get_event_target(event).closest("a");
+
+    if (elem) {
+      //cross browser click coordinates
+      domUtils_1.get_page_coord(event); //record click event
+
+      if (consent_1.Consent.check_consent("clicks")) {
+        eventUtils_1.push_events({
+          key: "linkClick",
+          segmentation: {
+            href: elem.href,
+            text: elem.innerText,
+            id: elem.id,
+            view: domUtils_1.getViewUrl()
+          }
+        });
+      }
+    }
+  } //add any events you want
+
+
+  domUtils_1.add_dom_event(parent, "click", processClick);
+}
+
+exports.track_all_links = track_all_links;
+},{"../../core/browser/domUtils":"core/browser/domUtils.ts","../../core/consents/consent":"core/consents/consent.ts","../../core/eventUtils":"core/eventUtils.ts"}],"trackers/implicit/page-scroll.ts":[function(require,module,exports) {
+"use strict";
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.track_page_scrolls = void 0;
+
+var domUtils_1 = require("../../core/browser/domUtils");
+
+var consent_1 = require("../../core/consents/consent");
+
+var eventUtils_1 = require("../../core/eventUtils");
+/**
+ * Track all scrolls on this page
+ * @param {Object=} parent - DOM object which children to track, by default it is document body
+ **/
+
+
+function track_page_scrolls(parent) {
+  parent = parent || window;
+  var shouldProcess = true;
+  var scrollY = 0;
+
+  function processScroll() {
+    scrollY = Math.max(scrollY, window.scrollY, document.body.scrollTop, document.documentElement.scrollTop);
+  }
+
+  function processScrollView() {
+    if (consent_1.Consent.check_consent("scrolls")) {
+      if (shouldProcess) {
+        shouldProcess = false;
+        var height = domUtils_1.getDocHeight();
+        var width = domUtils_1.getDocWidth();
+        var viewportHeight = domUtils_1.getViewportHeight();
+        eventUtils_1.push_events({
+          key: "page-scroll",
+          segmentation: {
+            type: "scroll",
+            y: scrollY + viewportHeight,
+            width: width,
+            height: height,
+            domain: window.location.hostname,
+            view: domUtils_1.getViewUrl()
+          }
+        });
+      }
+    }
+  }
+
+  domUtils_1.add_dom_event(parent, "scroll", processScroll);
+  domUtils_1.add_dom_event(parent, "beforeunload", processScrollView);
+  domUtils_1.add_dom_event(parent, "unload", processScrollView);
+}
+
+exports.track_page_scrolls = track_page_scrolls;
+},{"../../core/browser/domUtils":"core/browser/domUtils.ts","../../core/consents/consent":"core/consents/consent.ts","../../core/eventUtils":"core/eventUtils.ts"}],"trackers/implicit/page_view.ts":[function(require,module,exports) {
+"use strict";
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.add_implicit_track_pageview_event = void 0;
+
+var eventUtils_1 = require("../../core/eventUtils");
+
+var domUtils_1 = require("../../core/browser/domUtils");
+
+var logger_1 = require("../../core/logger");
+/**
+ * Track page views user visits
+ * @param {array=} ignoreList - optional array of strings or regexes to test for the url/view name to ignore and not report
+ **/
+
+
+function add_implicit_track_pageview_event(ignoreList) {
+  // here we push current page.
+  pushPageViewEvent(); // this will give us a way to subscribe to all page navigations
+
+  history.pushState = function (f) {
+    return function pushState() {
+      var args = [];
+
+      for (var _i = 0; _i < arguments.length; _i++) {
+        args[_i] = arguments[_i];
+      }
+
+      var ret = f.apply(this, args);
+      window.dispatchEvent(new Event("locationchange"));
+      return ret;
+    };
+  }(history.pushState); // We are tracking here whenever user navigates
+
+
+  window.addEventListener("locationchange", function () {
+    pushPageViewEvent();
+  });
+
+  function isInIgnoreList(ignoreList, page) {
+    if (ignoreList && ignoreList.length) {
+      for (var i = 0; i < ignoreList.length; i++) {
+        try {
+          var reg = new RegExp(ignoreList[i]);
+
+          if (reg.test(page)) {
+            logger_1.Logger.log("Ignored:", page);
+            return true;
+          }
+        } catch (ex) {
+          logger_1.Logger.log("Problem with regex", ignoreList[i]); // TODO: Need to decide on this
+
+          return false;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  function pushPageViewEvent() {
+    var page = domUtils_1.getViewName();
+
+    if (!isInIgnoreList(ignoreList, page)) {
+      var view = domUtils_1.getViewUrl();
+      var segments = {
+        name: page,
+        visit: 1,
+        domain: window.location.hostname,
+        view: view
+      };
+      eventUtils_1.push_events({
+        key: "page_view",
+        segmentation: segments
+      });
+    }
+  }
+}
+
+exports.add_implicit_track_pageview_event = add_implicit_track_pageview_event;
+},{"../../core/eventUtils":"core/eventUtils.ts","../../core/browser/domUtils":"core/browser/domUtils.ts","../../core/logger":"core/logger/index.ts"}],"core/helpers/genericHelpers.ts":[function(require,module,exports) {
+"use strict";
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.XNOR = void 0;
+
+function XNOR(a, b) {
+  //NOTE: These all are equivalent. Kept for a reference/understanding.
+  // return  (a && b) || (!a && !b);
+  // return  (a && b) || !(a || b);
+  return a === b;
+}
+
+exports.XNOR = XNOR;
+},{}],"trackers/implicit/url-data.ts":[function(require,module,exports) {
+"use strict";
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.UrlQueryParamsTracker = void 0;
+
+var cdlxContext_1 = require("../../cdlxContext");
+
+var genericHelpers_1 = require("../../core/helpers/genericHelpers");
+
+var store_1 = require("../../core/store/store");
+
+var UrlQueryParamsTracker =
+/** @class */
+function () {
+  function UrlQueryParamsTracker() {
+    this.urlParamsInfo = {};
+    this.utmTagsInfo = {};
+    this.urlParamsInfo = this.urlParamsInfo || store_1.store("urlParamsInfo");
+    this.utmTagsInfo = this.utmTagsInfo || store_1.store("utmTagsInfo");
+  }
+
+  UrlQueryParamsTracker.prototype.track_url_query_params = function () {
+    var i = 0; // This structure will evolve as we decide on how and what to configure.
+
+    cdlxContext_1.Cdlx.queryParamsToCaptureInfo = cdlxContext_1.Cdlx.queryParamsToCaptureInfo || {
+      isInclude: true,
+      params: ["advertiserId", "institutionId", "userId", "campaignId", "xyz"]
+    };
+
+    if (location.search) {
+      var parts = location.search.substring(1).split("&"); // TODO: Move to Config defaults.
+
+      cdlxContext_1.Cdlx.utm = cdlxContext_1.Cdlx.utm || {
+        source: true,
+        medium: true,
+        campaign: true,
+        term: true,
+        content: true
+      };
+
+      var _loop_1 = function _loop_1() {
+        var nv = parts[i].split("=");
+        var key;
+        var value = void 0; // Assumption: No = operators inside key/value, assuming they will be encoded
+
+        if (nv.length === 1) {
+          key = nv[0];
+          value = nv[0]; // ''
+        } else {
+          key = nv[0];
+          value = nv[1];
+        }
+
+        var isMatched = cdlxContext_1.Cdlx.queryParamsToCaptureInfo.params.findIndex(function (k) {
+          return k === key;
+        }) > -1; // if ((Cdlx.queryParamsToCaptureInfo.isInclude && isMatched)
+        // || (!Cdlx.queryParamsToCaptureInfo.isInclude && !isMatched)) {
+        //   dataCaptured.push({ key, value });
+        // }
+
+        if (genericHelpers_1.XNOR(cdlxContext_1.Cdlx.queryParamsToCaptureInfo.isInclude, isMatched)) {
+          this_1.utmTagsInfo[key] = value;
+        } // IsUtmTag
+
+
+        if (key.indexOf("utm_") === 0 && cdlxContext_1.Cdlx.utm[key.replace("utm_", "")]) {
+          this_1.urlParamsInfo[key] = value;
+        }
+      };
+
+      var this_1 = this;
+
+      for (i = 0; i < parts.length; i++) {
+        _loop_1();
+      }
+
+      this.saveUrlParamsInfo();
+      this.saveUtmTagsInfo();
+    }
+  };
+
+  UrlQueryParamsTracker.prototype.saveUrlParamsInfo = function () {
+    store_1.store("urlParamsInfo", this.urlParamsInfo);
+  };
+
+  UrlQueryParamsTracker.prototype.saveUtmTagsInfo = function () {
+    store_1.store("utmTagsInfo", this.utmTagsInfo);
+  };
+
+  return UrlQueryParamsTracker;
+}();
+
+var queryParamsTracker = new UrlQueryParamsTracker();
+exports.UrlQueryParamsTracker = queryParamsTracker;
+},{"../../cdlxContext":"cdlxContext.ts","../../core/helpers/genericHelpers":"core/helpers/genericHelpers.ts","../../core/store/store":"core/store/store.ts"}],"trackers/implicit/user-session.ts":[function(require,module,exports) {
+"use strict";
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.UserSessionTracker = void 0;
+
+var domUtils_1 = require("../../core/browser/domUtils");
+
+var sessionUtils_1 = require("../../core/sessionUtils");
+
+var configs_1 = require("../../core/configs");
+
+var UserSessionTracker =
+/** @class */
+function () {
+  function UserSessionTracker() {
+    this.inactivityCounter = 0;
+  }
+  /**
+   * Track user sessions automatically, including  time user spent on your website
+   **/
+
+
+  UserSessionTracker.prototype.track_user_sessions = function () {
+    var _this = this; //start session
+
+
+    sessionUtils_1.Session.begin_session();
+    sessionUtils_1.Session.start_time(); //end session on unload
+
+    domUtils_1.add_dom_event(window, "beforeunload", function () {
+      sessionUtils_1.Session.end_session();
+    });
+    domUtils_1.add_dom_event(window, "unload", function () {
+      sessionUtils_1.Session.end_session();
+    }); //manage sessions on window visibility events
+
+    var hidden = "hidden";
+
+    function onchange() {
+      if (document[hidden]) {
+        sessionUtils_1.Session.stop_time();
+      } else {
+        sessionUtils_1.Session.start_time();
+      }
+    } //Page Visibility API
+
+
+    if (hidden in document) {
+      document.addEventListener("visibilitychange", onchange);
+    } else if ((hidden = "mozHidden") in document) {
+      document.addEventListener("mozvisibilitychange", onchange);
+    } else if ((hidden = "webkitHidden") in document) {
+      document.addEventListener("webkitvisibilitychange", onchange);
+    } else if ((hidden = "msHidden") in document) {
+      document.addEventListener("msvisibilitychange", onchange);
+    } // IE 9 and lower:
+    else if ("onfocusin" in document) {
+        domUtils_1.add_dom_event(window, "focusin", function () {
+          sessionUtils_1.Session.start_time();
+        });
+        domUtils_1.add_dom_event(window, "focusout", function () {
+          sessionUtils_1.Session.stop_time();
+        });
+      } // All others:
+      else {
+          //old way
+          domUtils_1.add_dom_event(window, "focus", function () {
+            sessionUtils_1.Session.start_time();
+          });
+          domUtils_1.add_dom_event(window, "blur", function () {
+            sessionUtils_1.Session.stop_time();
+          }); //newer mobile compatible way
+
+          domUtils_1.add_dom_event(window, "pageshow", function () {
+            sessionUtils_1.Session.start_time();
+          });
+          domUtils_1.add_dom_event(window, "pagehide", function () {
+            sessionUtils_1.Session.stop_time();
+          });
+        }
+
+    domUtils_1.add_dom_event(window, "mousemove", this.resetInactivity);
+    domUtils_1.add_dom_event(window, "click", this.resetInactivity);
+    domUtils_1.add_dom_event(window, "keydown", this.resetInactivity);
+    domUtils_1.add_dom_event(window, "scroll", this.resetInactivity); //track user inactivity
+
+    setInterval(function () {
+      _this.inactivityCounter++;
+
+      if (_this.inactivityCounter >= configs_1.DefaultConfig.inactivityTime) {
+        sessionUtils_1.Session.stop_time();
+      }
+    }, 60000);
+  };
+
+  UserSessionTracker.prototype.resetInactivity = function () {
+    if (this.inactivityCounter >= configs_1.DefaultConfig.inactivityTime) {
+      sessionUtils_1.Session.start_time();
+    }
+
+    this.inactivityCounter = 0;
+  };
+
+  return UserSessionTracker;
+}();
+
+var sessionTracker = new UserSessionTracker();
+exports.UserSessionTracker = sessionTracker;
+},{"../../core/browser/domUtils":"core/browser/domUtils.ts","../../core/sessionUtils":"core/sessionUtils.ts","../../core/configs":"core/configs.ts"}],"trackers/implicit/implicit_trackers_init.ts":[function(require,module,exports) {
+"use strict";
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.implicit_trackers_init = void 0;
+
+var configs_1 = require("../../core/configs");
+
+var consent_1 = require("../../core/consents/consent");
+
+var logger_1 = require("../../core/logger");
+
+var all_clicks_1 = require("./all-clicks");
+
+var all_links_1 = require("./all-links");
+
+var page_scroll_1 = require("./page-scroll");
+
+var page_view_1 = require("./page_view");
+
+var url_data_1 = require("./url-data");
+
+var user_session_1 = require("./user-session");
+
+function implicit_trackers_init() {
+  // check the consents and attach the implicit tracking events
+  logger_1.Logger.log("implicit trackers initialized");
+
+  if (consent_1.Consent.check_consent("views")) {
+    page_view_1.add_implicit_track_pageview_event(configs_1.Config.pagesToIgnoreWhileViewTracking);
+    logger_1.Logger.log("attached implicit page_view tracker");
+  }
+
+  if (consent_1.Consent.check_consent("query-params")) {
+    url_data_1.UrlQueryParamsTracker.track_url_query_params();
+    logger_1.Logger.log("attached implicit tracker for track_url_query_params");
+  }
+
+  if (consent_1.Consent.check_consent("all-clicks")) {
+    all_clicks_1.track_all_clicks();
+    logger_1.Logger.log("attached implicit tracker for track_all_clicks");
+  }
+
+  if (consent_1.Consent.check_consent("all-links")) {
+    all_links_1.track_all_links();
+    logger_1.Logger.log("attached implicit tracker for track_all_links");
+  }
+
+  if (consent_1.Consent.check_consent("scrolls")) {
+    page_scroll_1.track_page_scrolls();
+    logger_1.Logger.log("attached implicit tracker for track_page_scrolls");
+  }
+
+  if (consent_1.Consent.check_consent("sessions")) {
+    user_session_1.UserSessionTracker.track_user_sessions();
+    logger_1.Logger.log("attached implicit tracker for track_user_sessions ");
+  }
+}
+
+exports.implicit_trackers_init = implicit_trackers_init;
+},{"../../core/configs":"core/configs.ts","../../core/consents/consent":"core/consents/consent.ts","../../core/logger":"core/logger/index.ts","./all-clicks":"trackers/implicit/all-clicks.ts","./all-links":"trackers/implicit/all-links.ts","./page-scroll":"trackers/implicit/page-scroll.ts","./page_view":"trackers/implicit/page_view.ts","./url-data":"trackers/implicit/url-data.ts","./user-session":"trackers/implicit/user-session.ts"}],"initialiser.ts":[function(require,module,exports) {
 "use strict";
 
 var __importDefault = this && this.__importDefault || function (mod) {
@@ -2867,7 +3375,7 @@ var __importDefault = this && this.__importDefault || function (mod) {
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.initializeAnalytics = void 0;
+exports.AnalyticsInitializer = void 0;
 
 var configs_1 = require("./core/configs");
 
@@ -2893,42 +3401,59 @@ var misc_1 = require("./core/helpers/misc");
 
 var polyfillsAsPrototype_1 = require("./core/helpers/polyfillsAsPrototype");
 
-function initializeAnalytics(input) {
-  if (!configs_1.Config.inited) {
-    // Granting consent for all features.
-    consent_1.Consent.initConsents(globals_1.default.features);
-    configs_1.Config.initConfig(input);
-    polyfillsAsPrototype_1.createPolyfills(); // Cdlx.init(ob); //Check:
+var implicit_trackers_init_1 = require("./trackers/implicit/implicit_trackers_init");
 
-    misc_1.checkVistorIgnore();
-    misc_1.checkUrlDataForHeatmapAndToken();
+var AnalyticsInitializer =
+/** @class */
+function () {
+  function AnalyticsInitializer() {
+    this.inited = false;
+  }
 
-    if (!configs_1.Config.ignore_visitor) {
-      logger_1.Logger.log("Cdlx initialized"); //let code waiting for us to load, know that we have loaded
+  AnalyticsInitializer.prototype.initialize = function (input) {
+    if (!this.inited) {
+      // Granting consent for all features, incase no explicit consentsAllowed.
+      consent_1.Consent.initConsents(configs_1.Config.consentsAllowed || globals_1.default.features);
+      configs_1.Config.initConfig(input);
+      polyfillsAsPrototype_1.createPolyfills(); // Cdlx.init(ob); //Check:
 
-      if (cdlxContext_1.Cdlx.onload.constructor !== Array) {
-        cdlxContext_1.Cdlx.onload = [];
-      }
+      misc_1.checkVistorIgnore();
+      misc_1.checkUrlDataForHeatmapAndToken();
 
-      utmTagTracker_1.captureUtmTags();
+      if (!configs_1.Config.ignore_visitor) {
+        logger_1.Logger.log("Cdlx initialized"); //let code waiting for us to load, know that we have loaded
 
-      if (!configWrapper_1.isOfflineMode()) {
-        if (configs_1.Config.device_id !== store_1.store("cly_id")) {
-          store_1.store("cly_id", configs_1.Config.device_id);
+        if (cdlxContext_1.Cdlx.onload.constructor !== Array) {
+          cdlxContext_1.Cdlx.onload = [];
+        }
+
+        utmTagTracker_1.captureUtmTags();
+
+        if (!configWrapper_1.isOfflineMode()) {
+          if (configs_1.Config.device_id !== store_1.store("cly_id")) {
+            store_1.store("cly_id", configs_1.Config.device_id);
+          }
+        }
+
+        heartBeat_1.HeartBeat.heartBeat(); // notifyLoaders();
+
+        if (configs_1.Config.remote_config) {
+          fetchRemoteConfig_1.fetch_remote_config(configs_1.Config.remote_config);
         }
       }
 
-      heartBeat_1.HeartBeat.heartBeat(); // notifyLoaders();
-
-      if (configs_1.Config.remote_config) {
-        fetchRemoteConfig_1.fetch_remote_config(configs_1.Config.remote_config);
+      if (configs_1.Config.isPureConsentBased) {
+        implicit_trackers_init_1.implicit_trackers_init();
       }
     }
-  }
-}
+  };
 
-exports.initializeAnalytics = initializeAnalytics;
-},{"./core/configs":"core/configs.ts","./core/logger":"core/logger/index.ts","./core/store/store":"core/store/store.ts","./cdlxContext":"cdlxContext.ts","./core/configWrapper":"core/configWrapper.ts","./core/fetchRemoteConfig":"core/fetchRemoteConfig.ts","./trackers/heartBeat":"trackers/heartBeat.ts","./core/consents/consent":"core/consents/consent.ts","./core/globals":"core/globals.ts","./trackers/utmTagTracker":"trackers/utmTagTracker.ts","./core/helpers/misc":"core/helpers/misc.ts","./core/helpers/polyfillsAsPrototype":"core/helpers/polyfillsAsPrototype.ts"}],"../node_modules/process/browser.js":[function(require,module,exports) {
+  return AnalyticsInitializer;
+}();
+
+var initializer = new AnalyticsInitializer();
+exports.AnalyticsInitializer = initializer;
+},{"./core/configs":"core/configs.ts","./core/logger":"core/logger/index.ts","./core/store/store":"core/store/store.ts","./cdlxContext":"cdlxContext.ts","./core/configWrapper":"core/configWrapper.ts","./core/fetchRemoteConfig":"core/fetchRemoteConfig.ts","./trackers/heartBeat":"trackers/heartBeat.ts","./core/consents/consent":"core/consents/consent.ts","./core/globals":"core/globals.ts","./trackers/utmTagTracker":"trackers/utmTagTracker.ts","./core/helpers/misc":"core/helpers/misc.ts","./core/helpers/polyfillsAsPrototype":"core/helpers/polyfillsAsPrototype.ts","./trackers/implicit/implicit_trackers_init":"trackers/implicit/implicit_trackers_init.ts"}],"../node_modules/process/browser.js":[function(require,module,exports) {
 
 // shim for using process in browser
 var process = module.exports = {}; // cached from whatever global is present so that test runners that stub it
@@ -14137,7 +14662,7 @@ function configure_track_click_events() {
         var width = domUtils_1.getDocWidth(); //record click event
         // if (Consent.check_consent("clicks")) {
 
-        eventUtils_1.push_custom_events({
+        eventUtils_1.push_events({
           key: "custom_action",
           category: triggerConfiguration.configuration.category,
           eventElement: triggerConfiguration.configuration.eventElement,
@@ -14162,168 +14687,7 @@ function configure_track_click_events() {
 }
 
 exports.configure_track_click_events = configure_track_click_events;
-},{"../../core/browser/domUtils":"core/browser/domUtils.ts","../../core/eventUtils":"core/eventUtils.ts","jquery":"../node_modules/jquery/dist/jquery.js","./tagsConfig.json":"trackers/tags/tagsConfig.json"}],"trackers/sessionTracker.ts":[function(require,module,exports) {
-"use strict";
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.track_sessions = void 0;
-
-var domUtils_1 = require("../core/browser/domUtils");
-
-var sessionUtils_1 = require("../core/sessionUtils");
-
-var configs_1 = require("../core/configs");
-/**
- * Track user sessions automatically, including  time user spent on your website
- **/
-
-
-function track_sessions() {
-  //start session
-  sessionUtils_1.Session.begin_session();
-  sessionUtils_1.Session.start_time(); //end session on unload
-
-  domUtils_1.add_dom_event(window, "beforeunload", function () {
-    sessionUtils_1.Session.end_session();
-  });
-  domUtils_1.add_dom_event(window, "unload", function () {
-    sessionUtils_1.Session.end_session();
-  }); //manage sessions on window visibility events
-
-  var hidden = "hidden";
-
-  function onchange() {
-    if (document[hidden]) {
-      sessionUtils_1.Session.stop_time();
-    } else {
-      sessionUtils_1.Session.start_time();
-    }
-  } //Page Visibility API
-
-
-  if (hidden in document) {
-    document.addEventListener("visibilitychange", onchange);
-  } else if ((hidden = "mozHidden") in document) {
-    document.addEventListener("mozvisibilitychange", onchange);
-  } else if ((hidden = "webkitHidden") in document) {
-    document.addEventListener("webkitvisibilitychange", onchange);
-  } else if ((hidden = "msHidden") in document) {
-    document.addEventListener("msvisibilitychange", onchange);
-  } // IE 9 and lower:
-  else if ("onfocusin" in document) {
-      domUtils_1.add_dom_event(window, "focusin", function () {
-        sessionUtils_1.Session.start_time();
-      });
-      domUtils_1.add_dom_event(window, "focusout", function () {
-        sessionUtils_1.Session.stop_time();
-      });
-    } // All others:
-    else {
-        //old way
-        domUtils_1.add_dom_event(window, "focus", function () {
-          sessionUtils_1.Session.start_time();
-        });
-        domUtils_1.add_dom_event(window, "blur", function () {
-          sessionUtils_1.Session.stop_time();
-        }); //newer mobile compatible way
-
-        domUtils_1.add_dom_event(window, "pageshow", function () {
-          sessionUtils_1.Session.start_time();
-        });
-        domUtils_1.add_dom_event(window, "pagehide", function () {
-          sessionUtils_1.Session.stop_time();
-        });
-      }
-
-  function resetInactivity() {
-    if (configs_1.DefaultConfig.inactivityCounter >= configs_1.DefaultConfig.inactivityTime) {
-      sessionUtils_1.Session.start_time();
-    }
-
-    configs_1.DefaultConfig.inactivityCounter = 0;
-  }
-
-  domUtils_1.add_dom_event(window, "mousemove", resetInactivity);
-  domUtils_1.add_dom_event(window, "click", resetInactivity);
-  domUtils_1.add_dom_event(window, "keydown", resetInactivity);
-  domUtils_1.add_dom_event(window, "scroll", resetInactivity); //track user inactivity
-
-  setInterval(function () {
-    configs_1.DefaultConfig.inactivityCounter++;
-
-    if (configs_1.DefaultConfig.inactivityCounter >= configs_1.DefaultConfig.inactivityTime) {
-      sessionUtils_1.Session.stop_time();
-    }
-  }, 60000);
-}
-
-exports.track_sessions = track_sessions;
-},{"../core/browser/domUtils":"core/browser/domUtils.ts","../core/sessionUtils":"core/sessionUtils.ts","../core/configs":"core/configs.ts"}],"trackers/urlDataTracker.ts":[function(require,module,exports) {
-"use strict";
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.captureUrlQueryParams = void 0;
-
-var cdlxContext_1 = require("../cdlxContext");
-
-function captureUrlQueryParams() {
-  var i = 0;
-  cdlxContext_1.Cdlx.queryParamsToCaptureInfo = cdlxContext_1.Cdlx.queryParamsToCaptureInfo || {
-    isInclude: true,
-    params: ["advertiserId", "institutionId", "userId", "campaignId", "xyz"]
-  };
-  var dataCaptured = [];
-
-  if (location.search) {
-    var parts = location.search.substring(1).split("&");
-
-    var _loop_1 = function _loop_1() {
-      var nv = parts[i].split("=");
-      var key;
-      var value = void 0; // Assumption: No = operators inside key/value, assuming they will be encoded
-
-      if (nv.length === 1) {
-        key = nv[0];
-        value = nv[0]; // ''
-      } else {
-        key = nv[0];
-        value = nv[1];
-      }
-
-      var isMatched = cdlxContext_1.Cdlx.queryParamsToCaptureInfo.params.findIndex(function (k) {
-        return k === key;
-      }) > -1;
-
-      if (cdlxContext_1.Cdlx.queryParamsToCaptureInfo.isInclude) {
-        if (isMatched) {
-          dataCaptured.push({
-            key: key,
-            value: value
-          });
-        }
-      } else {
-        // Exclude case
-        if (!isMatched) {
-          dataCaptured.push({
-            key: key,
-            value: value
-          });
-        }
-      }
-    };
-
-    for (i = 0; i < parts.length; i++) {
-      _loop_1();
-    }
-  }
-}
-
-exports.captureUrlQueryParams = captureUrlQueryParams;
-},{"../cdlxContext":"cdlxContext.ts"}],"cdlxContext.ts":[function(require,module,exports) {
+},{"../../core/browser/domUtils":"core/browser/domUtils.ts","../../core/eventUtils":"core/eventUtils.ts","jquery":"../node_modules/jquery/dist/jquery.js","./tagsConfig.json":"trackers/tags/tagsConfig.json"}],"cdlxContext.ts":[function(require,module,exports) {
 "use strict";
 
 Object.defineProperty(exports, "__esModule", {
@@ -14337,9 +14701,11 @@ var initialiser_1 = require("./initialiser");
 
 var tagsTracker_1 = require("./trackers/tags/tagsTracker");
 
-var sessionTracker_1 = require("./trackers/sessionTracker");
+var user_session_1 = require("./trackers/implicit/user-session");
 
-var urlDataTracker_1 = require("./trackers/urlDataTracker");
+var url_data_1 = require("./trackers/implicit/url-data");
+
+var globalContext_1 = require("./globalContext");
 
 var CdlxContext =
 /** @class */
@@ -14347,9 +14713,13 @@ function () {
   function CdlxContext() {
     this.track_pageview = trackPageView_1.track_pageview;
     this.configure_track_click_events = tagsTracker_1.configure_track_click_events;
-    this.track_sessions = sessionTracker_1.track_sessions;
-    this.captureUrlQueryParams = urlDataTracker_1.captureUrlQueryParams;
+    this.track_sessions = user_session_1.UserSessionTracker.track_user_sessions;
+    this.captureUrlQueryParams = url_data_1.UrlQueryParamsTracker.track_url_query_params;
   }
+
+  CdlxContext.prototype.setContextInfo = function (contextInfo) {
+    globalContext_1.GlobalContext.setContextInfo(contextInfo);
+  };
 
   CdlxContext.clone = function (obj) {
     var clone = new CdlxContext();
@@ -14373,14 +14743,18 @@ function () {
 
 
   CdlxContext.prototype.init = function (input) {
-    this.q = this.q || [];
+    try {
+      this.q = this.q || [];
 
-    if (this.q.constructor !== Array) {
-      this.q = [];
+      if (this.q.constructor !== Array) {
+        this.q = [];
+      }
+
+      this.onload = this.onload || [];
+      initialiser_1.AnalyticsInitializer.initialize(input);
+    } catch (error) {
+      console.error("error while init of tracker.", error);
     }
-
-    this.onload = this.onload || [];
-    initialiser_1.initializeAnalytics(input);
   };
 
   return CdlxContext;
@@ -14396,7 +14770,7 @@ if (window.Cdlx) {
   exports.Cdlx = cdlx = new CdlxContext();
   window.Cdlx = cdlx;
 }
-},{"./trackers/trackPageView":"trackers/trackPageView.ts","./initialiser":"initialiser.ts","./trackers/tags/tagsTracker":"trackers/tags/tagsTracker.ts","./trackers/sessionTracker":"trackers/sessionTracker.ts","./trackers/urlDataTracker":"trackers/urlDataTracker.ts"}],"index.ts":[function(require,module,exports) {
+},{"./trackers/trackPageView":"trackers/trackPageView.ts","./initialiser":"initialiser.ts","./trackers/tags/tagsTracker":"trackers/tags/tagsTracker.ts","./trackers/implicit/user-session":"trackers/implicit/user-session.ts","./trackers/implicit/url-data":"trackers/implicit/url-data.ts","./globalContext":"globalContext.ts"}],"index.ts":[function(require,module,exports) {
 "use strict";
 
 Object.defineProperty(exports, "__esModule", {
@@ -14441,7 +14815,7 @@ var parent = module.bundle.parent;
 if ((!parent || !parent.isParcelRequire) && typeof WebSocket !== 'undefined') {
   var hostname = "" || location.hostname;
   var protocol = location.protocol === 'https:' ? 'wss' : 'ws';
-  var ws = new WebSocket(protocol + '://' + hostname + ':' + "55525" + '/');
+  var ws = new WebSocket(protocol + '://' + hostname + ':' + "62944" + '/');
 
   ws.onmessage = function (event) {
     checkedAssets = {};
